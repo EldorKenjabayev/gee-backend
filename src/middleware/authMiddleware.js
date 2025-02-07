@@ -1,32 +1,32 @@
 const db = require("../config/db");
 const jwt = require("jsonwebtoken");
+const redis = require("../config/redis");
 
 async function authMiddleware(req, res, next) {
   try {
     const token = req.headers.authorization?.split(" ")[1];
-    console.log("Received token:", token); // Логируем полученный токен
-    if (!token) {
-      return res.status(401).json({ error: "Токен отсутствует" });
+    if (!token) return res.status(401).json({ error: "Токен отсутствует" });
+
+    // Проверяем кеш в Redis
+    const cachedUser = await redis.get(`token:${token}`);
+    if (cachedUser) {
+      req.user = JSON.parse(cachedUser);
+      return next();
     }
 
-    // Проверяем токен
+    // Декодируем JWT
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    console.log("Decoded token:", decoded); // Логируем декодированный токен
+    const user = await db.oneOrNone("SELECT * FROM users WHERE email = $1", [decoded.email]);
 
-    // Проверяем, есть ли токен в базе
-    const user = await db.oneOrNone("SELECT * FROM users WHERE email = $1 AND token = $2", [
-      decoded.email,
-      token,
-    ]);
+    if (!user) return res.status(401).json({ error: "Неверный токен" });
 
-    if (!user) {
-      return res.status(401).json({ error: "Неверный токен" });
-    }
+    // Кешируем пользователя на 1 час
+    await redis.setex(`token:${token}`, 3600, JSON.stringify(user));
 
     req.user = user;
     next();
   } catch (error) {
-    console.error("Authentication error:", error); // Логируем ошибку
+    console.error("Ошибка аутентификации:", error);
     res.status(401).json({ error: "Ошибка аутентификации" });
   }
 }

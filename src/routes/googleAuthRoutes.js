@@ -15,7 +15,7 @@ router.get(
       "https://www.googleapis.com/auth/devstorage.read_only",
       "https://www.googleapis.com/auth/earthengine.readonly",
     ],
-    accessType: "offline",
+    accessType: "offline", // 🔥 Важно! Даёт Refresh Token
     prompt: "consent",
   })
 );
@@ -28,21 +28,22 @@ router.get(
     try {
       console.log("🔥 Google OAuth успешен:", req.user);
 
-      const { email, google_id, google_access_token } = req.user;
-      if (!email || !google_access_token) {
-        return res.status(400).json({ error: "Google не вернул email или access_token" });
+      const { email, google_id, accessToken, refreshToken } = req.user;
+
+      if (!email || !accessToken || !refreshToken) {
+        return res.status(400).json({ error: "Google не вернул email, access_token или refresh_token" });
       }
 
       // Генерируем JWT-токен
       const token = jwt.sign({ email, google_id }, process.env.JWT_SECRET, { expiresIn: "7d" });
 
-      // Сохраняем пользователя и его Google Access Token в БД
+      // ✅ Сохраняем Access Token и Refresh Token правильно
       await db.none(
-        "UPDATE users SET token = $1, google_access_token = $2 WHERE google_id = $3",
-        [token, google_access_token, google_id]
+        "UPDATE users SET token = $1, google_access_token = $2, google_refresh_token = $3 WHERE google_id = $4",
+        [token, accessToken, refreshToken, google_id]
       );
 
-      console.log("✅ Google токен сохранен!");
+      console.log("✅ Access Token и Refresh Token сохранены!");
       res.redirect(`http://localhost:5173/google/callback?token=${token}`);
     } catch (error) {
       console.error("❌ Ошибка авторизации через Google:", error);
