@@ -13,14 +13,9 @@ passport.use(
       accessType: "offline",
       prompt: "consent",
       scope: [
-        "email",
-        "profile",
-        "openid",
-        "https://www.googleapis.com/auth/userinfo.email",
-        "https://www.googleapis.com/auth/userinfo.profile",
-        "https://www.googleapis.com/auth/devstorage.read_only",
         "https://www.googleapis.com/auth/earthengine.readonly",
-      ],
+        "https://www.googleapis.com/auth/cloud-platform"
+      ]
     },
     async (req, accessToken, refreshToken, profile, done) => {
       console.log("🔥 Google OAuth Response:");
