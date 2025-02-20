@@ -1,7 +1,7 @@
 const passport = require("passport");
 const GoogleStrategy = require("passport-google-oauth20").Strategy;
 const db = require("./db");
-const { OAuth2Client } = require("google-auth-library");
+// Если нужно, подключаете { OAuth2Client } = require("google-auth-library");
 
 passport.use(
   new GoogleStrategy(
@@ -13,9 +13,14 @@ passport.use(
       accessType: "offline",
       prompt: "consent",
       scope: [
+        "email",
+        "profile",
+        "openid",
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/userinfo.profile",
+        "https://www.googleapis.com/auth/devstorage.read_only",
         "https://www.googleapis.com/auth/earthengine.readonly",
-        "https://www.googleapis.com/auth/cloud-platform"
-      ]
+      ],
     },
     async (req, accessToken, refreshToken, profile, done) => {
       console.log("🔥 Google OAuth Response:");
@@ -24,28 +29,48 @@ passport.use(
       console.log("Profile:", profile);
 
       try {
+        // 1. Получаем email и google_id
         const email = profile.emails?.[0]?.value;
         const google_id = profile.id;
 
-        if (!email || !accessToken || !refreshToken) {
-          return done(null, false, { message: "Google не вернул email, access_token или refresh_token" });
+        // 2. Проверяем минимум: email и accessToken
+        if (!email || !accessToken) {
+          return done(null, false, {
+            message: "Google не вернул email или access_token",
+          });
         }
 
+        // (refreshToken может быть undefined, особенно при повторной авторизации)
+
+        // 3. Проверяем пользователя в БД
         let user = await db.oneOrNone("SELECT * FROM users WHERE google_id = $1", [google_id]);
 
         if (!user) {
+          // Если пользователя нет, создаём
           user = await db.one(
-            "INSERT INTO users (email, google_id, google_access_token, google_refresh_token) VALUES ($1, $2, $3, $4) RETURNING *",
+            `INSERT INTO users (email, google_id, google_access_token, google_refresh_token)
+             VALUES ($1, $2, $3, $4)
+             RETURNING *`,
             [email, google_id, accessToken, refreshToken]
           );
         } else {
+          // Если есть, обновляем только access и refresh (refresh - опционально)
           await db.none(
-            "UPDATE users SET google_access_token = $1, google_refresh_token = COALESCE($2, google_refresh_token) WHERE google_id = $3",
+            `UPDATE users
+             SET google_access_token = $1,
+                 google_refresh_token = COALESCE($2, google_refresh_token)
+             WHERE google_id = $3`,
             [accessToken, refreshToken, google_id]
           );
         }
 
-        return done(null, { email, google_id, accessToken, refreshToken }); // ✅ Передаём все данные
+        // 4. Передаём passport'у данные, которые попадут в req.user
+        return done(null, {
+          email,
+          google_id,
+          accessToken,
+          refreshToken,
+        });
       } catch (error) {
         return done(error, false);
       }
