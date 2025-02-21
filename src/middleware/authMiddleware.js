@@ -45,13 +45,11 @@ async function authMiddleware(req, res, next) {
       const payload = jwt.verify(token, process.env.JWT_SECRET);
       // payload = { email, google_id, iat, exp }
       // Ищем пользователя. Допустим, ищем по google_id
-      user = await db.oneOrNone("SELECT * FROM users WHERE google_id = $1", [payload.google_id]);
+      user = await db.oneOrNone("SELECT * FROM users WHERE id = $1", [payload.id]);
       if (!user) {
         return res.status(401).json({ error: "Пользователь не найден по JWT" });
       }
     }
-    //wdeiiiidewn
-    // 3) Кэшируем в Redis на час (3600 сек)
     await redis.setex(`token:${token}`, 3600, JSON.stringify(user));
 
     req.user = user;
