@@ -20,6 +20,10 @@ class User {
     static async comparePassword(password, hash) {
         return bcrypt.compare(password, hash);
     }
+
+    static async saveToken(userId, token) {
+        return db.none("UPDATE users SET token = $1 WHERE id = $2", [token, userId]);
+    }
 }
 
 module.exports = User;
