@@ -1,7 +1,7 @@
 const express = require("express");
 const ee = require("@google/earthengine");
 const authMiddleware = require("../middleware/authMiddleware");
-const privateKey = require("./my-earth-engine-app-197fbcfcb72a.json");
+const privateKey = require("./my-earth-engine-app-bfcb38819f13.json");
 
 const router = express.Router();
 
@@ -99,27 +99,35 @@ router.post("/ndvi-time-series", authMiddleware, async (req, res) => {
   }
 });
 
-// Эндпоинт для получения карты NDVI
-router.get("/ndvi-map", authMiddleware, async (req, res) => {
+// Эндпоинт для получения карты NDVI (обновленная версия)
+router.post("/ndvi-map", authMiddleware, async (req, res) => {
   if (!eeInitialized) {
     return res.status(500).json({ error: "Earth Engine не инициализирован" });
   }
 
   try {
-    const { startYear, endYear } = req.query;
-    if (!startYear || !endYear) {
+    const { startYear, endYear, polygon } = req.body;
+    
+    if (!startYear || !endYear || !polygon?.coordinates) {
       return res.status(400).json({ error: "Неверные параметры запроса" });
     }
 
-    const uzbekistan = ee.FeatureCollection("FAO/GAUL/2015/level0")
-      .filter(ee.Filter.eq('ADM0_NAME', 'Uzbekistan'));
+    if (!Array.isArray(polygon.coordinates) || 
+        polygon.coordinates.length === 0 ||
+        !Array.isArray(polygon.coordinates[0]) || 
+        polygon.coordinates[0].length < 3) {
+      return res.status(400).json({ error: "Некорректный формат полигона" });
+    }
+
+    const regionCoords = polygon.coordinates[0];
+    const region = ee.Geometry.Polygon(regionCoords);
 
     const ndviCollection = ee.ImageCollection("MODIS/006/MOD13A1")
-      .filterBounds(uzbekistan)
+      .filterBounds(region)
       .filter(ee.Filter.calendarRange(parseInt(startYear), parseInt(endYear), 'year'))
       .select("NDVI");
 
-    const meanNDVIImage = ndviCollection.mean().multiply(0.0001).clip(uzbekistan);
+    const meanNDVIImage = ndviCollection.mean().multiply(0.0001).clip(region);
 
     const visParams = {
       min: 0,
@@ -131,12 +139,20 @@ router.get("/ndvi-map", authMiddleware, async (req, res) => {
       ],
       dimensions: 1024,
       format: 'png',
-      region: uzbekistan.geometry()
+      region: region
     };
 
-    const mapURL = meanNDVIImage.getThumbURL(visParams);
+    const mapURL = await new Promise((resolve, reject) => {
+      meanNDVIImage.getThumbURL(visParams, (url, error) => {
+        error ? reject(error) : resolve(url);
+      });
+    });
 
-    res.json({ mapUrl: mapURL });
+    res.json({ 
+      mapUrl: mapURL,
+      bounds: regionCoords
+    });
+
   } catch (error) {
     console.error("❌ Ошибка получения карты NDVI:", error.message);
     res.status(500).json({
