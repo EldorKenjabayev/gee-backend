@@ -1,11 +1,10 @@
 const express = require("express");
 const ee = require("@google/earthengine");
 const authMiddleware = require("../middleware/authMiddleware");
-const privateKey = require("./my-earth-engine-app-bfcb38819f13.json");
+const privateKey = require("./my-earth-engine-app-e2e73b5596d4.json");
 
 const router = express.Router();
 
-// Инициализация Earth Engine
 let eeInitialized = false;
 
 async function initializeEarthEngine() {
@@ -29,75 +28,154 @@ async function initializeEarthEngine() {
 
 initializeEarthEngine();
 
-// Эндпоинт для временного ряда NDVI
+
 router.post("/ndvi-time-series", authMiddleware, async (req, res) => {
   if (!eeInitialized) {
     return res.status(500).json({ error: "Earth Engine не инициализирован" });
   }
 
   try {
-    const { startYear, endYear, polygon } = req.body;
+    const { startYear, endYear, polygon, aggregation } = req.body;
 
+    // Валидация параметров
     if (!startYear || !endYear || !polygon?.coordinates) {
       return res.status(400).json({ error: "Неверные параметры запроса" });
     }
 
-    if (!Array.isArray(polygon.coordinates) || polygon.coordinates.length < 3) {
+    const coordinates = Array.isArray(polygon.coordinates[0][0]) 
+      ? polygon.coordinates[0] 
+      : polygon.coordinates;
+
+    if (coordinates.length < 3) {
       return res.status(400).json({ error: "Некорректный формат полигона" });
     }
 
-    const region = ee.Geometry.Polygon(polygon.coordinates);
+    const region = ee.Geometry.Polygon(coordinates);
 
+    // Получение коллекции изображений
     const collection = ee.ImageCollection("MODIS/006/MOD13A1")
       .filterBounds(region)
       .filterDate(`${startYear}-01-01`, `${endYear}-12-31`)
       .select("NDVI");
 
-    const timeSeries = collection.map(image => {
+    // Агрегация данных
+    let processedCollection = collection;
+    if (aggregation === 'monthly') {
+      processedCollection = processedCollection
+        .map(image => image.set('month', image.date().get('month')))
+        .sort('system:time_start');
+    }
+
+    // Обработка изображений
+    const timeSeries = processedCollection.map(image => {
       const meanNDVI = image.reduceRegion({
         reducer: ee.Reducer.mean(),
         geometry: region,
         scale: 5000,
         bestEffort: true
       });
+      
       return ee.Feature(null, {
-        "system:time_start": image.get("system:time_start"),
+        "date": image.date().format("YYYY-MM-dd"),
         "NDVI": meanNDVI.get("NDVI")
       });
     });
 
-    timeSeries.evaluate((result, error) => {
-      if (error) {
-        console.error("❌ Ошибка при обработке NDVI:", error);
-        return res.status(500).json({
-          error: "Ошибка обработки запроса",
-          details: error.message
-        });
+    // Получение данных
+    const result = await timeSeries.reduceColumns({
+      reducer: ee.Reducer.toList(2),
+      selectors: ['date', 'NDVI']
+    }).get('list');
+
+    const formatted = result.getInfo()
+      .map(([date, ndvi]) => ({
+        date: date.replace(/T.*/, ''),
+        ndvi: ndvi ? parseFloat((ndvi * 0.0001).toFixed(4)) : null
+      }))
+      .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    res.json({ 
+      ndviTimeSeries: formatted,
+      stats: {
+        min: Math.min(...formatted.filter(f => f.ndvi).map(f => f.ndvi)),
+        max: Math.max(...formatted.filter(f => f.ndvi).map(f => f.ndvi)),
+        avg: formatted.filter(f => f.ndvi).reduce((a, b) => a + b.ndvi, 0) / formatted.length
       }
-
-      if (!result || !Array.isArray(result) || result.length < 1) {
-        console.warn("⚠️ Earth Engine вернул пустой массив.");
-        return res.status(404).json({ error: "Данные NDVI не найдены." });
-      }
-
-      const formatted = result.map(row => ({
-        date: new Date(row["system:time_start"]).toISOString().split('T')[0],
-        ndvi: row.NDVI ? row.NDVI * 0.0001 : null
-      }));
-
-      res.json({ ndviTimeSeries: formatted });
     });
 
   } catch (error) {
-    console.error("❌ Ошибка получения NDVI:", error.message);
-    if (!res.headersSent) {
-      res.status(500).json({
-        error: "Ошибка обработки запроса",
-        details: error.message
-      });
-    }
+    console.error("❌ Ошибка получения NDVI:", error);
+    res.status(500).json({
+      error: "Ошибка обработки запроса",
+      details: error.message
+    });
   }
 });
+
+/**
+ * @swagger
+ * /api/ndvi/time-series:
+ *   post:
+ *     summary: Получить временной ряд NDVI для региона
+ *     tags: [NDVI]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               startYear:
+ *                 type: integer
+ *                 example: 2020
+ *               endYear:
+ *                 type: integer
+ *                 example: 2023
+ *               polygon:
+ *                 type: object
+ *                 properties:
+ *                   coordinates:
+ *                     type: array
+ *                     items:
+ *                       type: array
+ *                       items: number
+ *                 example: 
+ *                   coordinates: [[59.1,37.5],[72.3,37.5],[72.3,45.9],[59.1,45.9],[59.1,37.5]]
+ *               aggregation:
+ *                 type: string
+ *                 enum: [daily, monthly]
+ *                 default: daily
+ *     responses:
+ *       200:
+ *         description: Данные для построения графика
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ndviTimeSeries:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       date:
+ *                         type: string
+ *                         format: date
+ *                       ndvi:
+ *                         type: number
+ *                         nullable: true
+ *                 stats:
+ *                   type: object
+ *                   properties:
+ *                     min:
+ *                       type: number
+ *                     max:
+ *                       type: number
+ *                     avg:
+ *                       type: number
+ */
 
 // Эндпоинт для получения карты NDVI (обновленная версия)
 router.post("/ndvi-map", authMiddleware, async (req, res) => {
