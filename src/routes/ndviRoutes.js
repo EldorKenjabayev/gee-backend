@@ -29,7 +29,7 @@ async function initializeEarthEngine() {
 initializeEarthEngine();
 
 
-router.post("/ndvi-time-series", authMiddleware, async (req, res) => {
+router.post("/ndvi-graph-series", authMiddleware, async (req, res) => {
   if (!eeInitialized) {
     return res.status(500).json({ error: "Earth Engine не инициализирован" });
   }
@@ -275,60 +275,5 @@ router.post("/ndvi-map", authMiddleware, async (req, res) => {
  *       200:
  *         description: URL карты NDVI
  */
-router.post("/dynamic-map", authMiddleware, async (req, res) => {
-  if (!eeInitialized) {
-    return res.status(500).json({ error: "Earth Engine не инициализирован" });
-  }
-
-  try {
-    const { startYear, endYear, polygon } = req.body;
-    
-    if (!startYear || !endYear || !polygon?.coordinates) {
-      return res.status(400).json({ error: "Неверные параметры запроса" });
-    }
-
-    const region = ee.Geometry.Polygon(polygon.coordinates);
-
-    const ndviCollection = ee.ImageCollection("MODIS/006/MOD13A1")
-      .filterBounds(region)
-      .filter(ee.Filter.calendarRange(startYear, endYear, 'year'))
-      .select("NDVI");
-
-    const meanNDVIImage = ndviCollection.mean()
-      .multiply(0.0001)
-      .clip(region);
-
-    const visParams = {
-      min: 0,
-      max: 0.8,
-      palette: [
-        'FFFFFF', 'CE7E45', 'DF923D', 'F1B555', 'FCD163', '99B718', '74A901',
-        '66A000', '529400', '3E8601', '207401', '056201', '004C00', '023B01',
-        '012E01', '011D01', '011301'
-      ],
-      dimensions: 1024,
-      format: 'png',
-      region: region
-    };
-
-    const mapURL = await new Promise((resolve, reject) => {
-      meanNDVIImage.getThumbURL(visParams, (url, error) => {
-        error ? reject(error) : resolve(url);
-      });
-    });
-
-    res.json({ 
-      mapUrl: mapURL,
-      bounds: polygon.coordinates[0] // Первый полигон для границ карты
-    });
-    
-  } catch (error) {
-    console.error("❌ Ошибка получения карты:", error);
-    res.status(500).json({
-      error: "Ошибка обработки запроса",
-      details: error.message
-    });
-  }
-});
 
 module.exports = router;

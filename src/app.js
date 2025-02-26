@@ -12,7 +12,7 @@ const googleAuthRoutes = require("./routes/googleAuthRoutes");
 const geeRoutes = require("./routes/geeRoutes");
 const ndviRoutes = require("./routes/ndviRoutes");
 const feedbackRoutes = require("./routes/feedbackRoutes");
-
+const waterRoutes = require("./routes/waterIndexRoutes");
 const app = express();
 setupSwagger(app);
 
@@ -28,6 +28,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/auth/google", googleAuthRoutes);
 app.use("/api/gee", geeRoutes);
 app.use("/api/ndvi", ndviRoutes);
+app.use("/api/water", waterRoutes );
 app.use("/api/feedback", feedbackRoutes);
 
 app.use(errorHandler);
