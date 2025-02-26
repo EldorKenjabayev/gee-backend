@@ -28,7 +28,7 @@ async function initializeEarthEngine() {
 
 initializeEarthEngine();
 
-router.post("/water-index-series", authMiddleware, async (req, res) => {
+router.post("/ndwi-graph-series", authMiddleware, async (req, res) => {
   if (!eeInitialized) {
     return res.status(500).json({ error: "Earth Engine не инициализирован" });
   }
@@ -69,17 +69,19 @@ router.post("/water-index-series", authMiddleware, async (req, res) => {
       const meanIndex = image.select(indexBand).reduceRegion({
         reducer: ee.Reducer.mean(),
         geometry: region,
-        scale: 20,
-        maxPixels: 1e9
+        scale: 100,
+        maxPixels: 1e13,
+        bestEffort: true
       });
 
-      // Рассчитываем площадь водных объектов (где индекс > 0)
+      // Рассчитываем площадь водных объектов
       const waterArea = image.select(indexBand).gt(0).multiply(ee.Image.pixelArea())
         .reduceRegion({
           reducer: ee.Reducer.sum(),
           geometry: region,
-          scale: 20,
-          maxPixels: 1e9
+          scale: 100,
+          maxPixels: 1e13,
+          bestEffort: true
         });
 
       return ee.Feature(null, {
@@ -123,7 +125,7 @@ router.post("/water-index-series", authMiddleware, async (req, res) => {
   }
 });
 
-router.post("/water-map", authMiddleware, async (req, res) => {
+router.post("/ndwi-map", authMiddleware, async (req, res) => {
   if (!eeInitialized) {
     return res.status(500).json({ error: "Earth Engine не инициализирован" });
   }
