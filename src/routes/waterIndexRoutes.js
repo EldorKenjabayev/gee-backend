@@ -34,7 +34,7 @@ router.post("/ndwi-graph-series", authMiddleware, async (req, res) => {
   }
 
   try {
-    const { startYear, endYear, polygon, aggregation, indexType = 'NDWI' } = req.body;
+    const { startYear, endYear, polygon, indexType = 'NDWI' } = req.body;
 
     if (!startYear || !endYear || !polygon?.coordinates) {
       return res.status(400).json({ error: "Неверные параметры запроса" });
@@ -46,71 +46,47 @@ router.post("/ndwi-graph-series", authMiddleware, async (req, res) => {
 
     const region = ee.Geometry.Polygon(coordinates);
 
-    // Используем Sentinel-2 для лучшего разрешения
-    const collection = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+    const collection = ee.ImageCollection('JRC/GSW1_4/MonthlyHistory')
       .filterBounds(region)
-      .filterDate(`${startYear}-01-01`, `${endYear}-12-31`)
-      .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 20))
+      .filter(ee.Filter.calendarRange(startYear, endYear, 'year'))
       .map(image => {
-        // NDWI = (Green - NIR) / (Green + NIR)
-        const ndwi = image.normalizedDifference(['B3', 'B8']).rename('NDWI');
-        
-        // MNDWI = (Green - SWIR) / (Green + SWIR)
-        const mndwi = image.normalizedDifference(['B3', 'B11']).rename('MNDWI');
-        
-        return image.addBands(ndwi).addBands(mndwi)
-          .set('system:time_start', image.get('system:time_start'));
+        const date = ee.Date(image.get('system:time_start')).format('YYYY-MM');
+        return image.set('date', date);
       });
-
-    // Выбираем индекс на основе параметра indexType
-    const indexBand = indexType === 'MNDWI' ? 'MNDWI' : 'NDWI';
 
     const timeSeries = collection.map(image => {
-      const meanIndex = image.select(indexBand).reduceRegion({
-        reducer: ee.Reducer.mean(),
-        geometry: region,
-        scale: 100,
-        maxPixels: 1e13,
-        bestEffort: true
-      });
-
-      // Рассчитываем площадь водных объектов
-      const waterArea = image.select(indexBand).gt(0).multiply(ee.Image.pixelArea())
+      const waterArea = image.select('water').eq(2).multiply(ee.Image.pixelArea())
         .reduceRegion({
           reducer: ee.Reducer.sum(),
           geometry: region,
-          scale: 100,
-          maxPixels: 1e13,
+          scale: 30,
+          maxPixels: 1e8,
           bestEffort: true
         });
 
       return ee.Feature(null, {
-        date: image.date().format("YYYY-MM-dd"),
-        waterIndex: meanIndex.get(indexBand),
-        waterArea: waterArea.get(indexBand)
+        date: image.get('date'),
+        waterArea: waterArea.get('water')
       });
     });
 
     const result = await timeSeries.reduceColumns({
-      reducer: ee.Reducer.toList(3),
-      selectors: ['date', 'waterIndex', 'waterArea']
+      reducer: ee.Reducer.toList(2),
+      selectors: ['date', 'waterArea']
     }).get('list');
 
     const formatted = result.getInfo()
-      .map(([date, waterIndex, waterArea]) => ({
-        date: date.replace(/T.*/, ''),
-        waterIndex: waterIndex ? parseFloat(waterIndex.toFixed(4)) : null,
-        waterAreaHa: waterArea ? parseFloat((waterArea / 10000).toFixed(2)) : null // Конвертируем м² в га
+      .map(([date, waterArea]) => ({
+        date: date,
+        waterAreaHa: waterArea ? parseFloat((waterArea / 10000).toFixed(2)) : null
       }))
       .sort((a, b) => new Date(a.date) - new Date(b.date));
 
     res.json({ 
       waterTimeSeries: formatted,
       stats: {
-        minIndex: Math.min(...formatted.filter(f => f.waterIndex).map(f => f.waterIndex)),
-        maxIndex: Math.max(...formatted.filter(f => f.waterIndex).map(f => f.waterIndex)),
-        avgIndex: formatted.filter(f => f.waterIndex).reduce((a, b) => a + b.waterIndex, 0) / 
-                 formatted.filter(f => f.waterIndex).length,
+        minAreaHa: Math.min(...formatted.filter(f => f.waterAreaHa).map(f => f.waterAreaHa)),
+        maxAreaHa: Math.max(...formatted.filter(f => f.waterAreaHa).map(f => f.waterAreaHa)),
         avgAreaHa: formatted.filter(f => f.waterAreaHa).reduce((a, b) => a + b.waterAreaHa, 0) / 
                   formatted.filter(f => f.waterAreaHa).length
       }
@@ -131,7 +107,7 @@ router.post("/ndwi-map", authMiddleware, async (req, res) => {
   }
 
   try {
-    const { startYear, endYear, polygon, indexType = 'NDWI' } = req.body;
+    const { startYear, endYear, polygon } = req.body;
     
     if (!startYear || !endYear || !polygon?.coordinates) {
       return res.status(400).json({ error: "Неверные параметры запроса" });
@@ -140,26 +116,16 @@ router.post("/ndwi-map", authMiddleware, async (req, res) => {
     const regionCoords = polygon.coordinates[0];
     const region = ee.Geometry.Polygon(regionCoords);
 
-    const collection = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+    const collection = ee.ImageCollection('JRC/GSW1_4/MonthlyHistory')
       .filterBounds(region)
-      .filterDate(`${startYear}-01-01`, `${endYear}-12-31`)
-      .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 20))
-      .map(image => {
-        const ndwi = image.normalizedDifference(['B3', 'B8']).rename('NDWI');
-        const mndwi = image.normalizedDifference(['B3', 'B11']).rename('MNDWI');
-        return image.addBands(ndwi).addBands(mndwi);
-      });
+      .filter(ee.Filter.calendarRange(startYear, endYear, 'year'));
 
-    const indexBand = indexType === 'MNDWI' ? 'MNDWI' : 'NDWI';
-    const meanWaterImage = collection.select(indexBand).mean().clip(region);
+    const meanWaterImage = collection.select('water').mean().clip(region);
 
     const visParams = {
-      min: -1,
-      max: 1,
-      palette: [
-        '#d73027', '#f46d43', '#fdae61', '#fee090', '#ffffbf',
-        '#e0f3f8', '#abd9e9', '#74add1', '#4575b4'
-      ],
+      min: 0.0,
+      max: 2.0,
+      palette: ['8B4513', 'FFFF00', '00FF00', '00FFFF', '0000FF'],
       dimensions: 1024,
       format: 'png'
     };
