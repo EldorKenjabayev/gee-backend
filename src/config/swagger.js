@@ -11,7 +11,7 @@ const options = {
     },
     servers: [
       {
-        url: "http://localhost:5000",
+        url: "https://cd02-217-30-173-218.ngrok-free.app/",
         description: "Local server",
       },
     ],

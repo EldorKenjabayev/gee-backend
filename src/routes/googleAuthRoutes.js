@@ -55,7 +55,7 @@ router.get(
       const token = jwt.sign({ email, google_id }, process.env.JWT_SECRET, { expiresIn: "7d" });
 
       console.log("✅ Foydalanuvchi ma'lumotlari saqlandi!");
-      res.redirect(`http://localhost:5173/google/callback?token=${token}`);
+      res.redirect(`https://my-earth-engine.vercel.app/google/callback?token=${token}`);
     } catch (error) {
       console.error("❌ Google orqali avtorizatsiya xatosi:", error);
       res.status(500).json({ error: "Ошибка авторизации" });

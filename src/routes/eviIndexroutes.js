@@ -1,7 +1,7 @@
 const express = require("express");
 const ee = require("@google/earthengine");
 const authMiddleware = require("../middleware/authMiddleware");
-const privateKey = require("./my-earth-engine-app-e2e73b5596d4.json");
+const privateKey = require("./my-earth-engine-app-e2e73b5596d4 (2).json");
 
 const router = express.Router();
 let eeInitialized = false;
@@ -25,6 +25,7 @@ async function initializeEarthEngine() {
   }
 }
 
+
 initializeEarthEngine();
 
 router.post("/evi-graph-series", authMiddleware, async (req, res) => {
@@ -47,11 +48,11 @@ router.post("/evi-graph-series", authMiddleware, async (req, res) => {
 
         const collection = ee.ImageCollection('MODIS/006/MOD13A2')
             .filterBounds(region)
-            .filter(ee.Filter.calendarRange(startYear, endYear, 'year'))
+            .filter(ee.Filter.date(startDate, endDate))
             .select('EVI');
 
         const timeSeries = collection.map(image => {
-            const date = ee.Date(image.get('system:time_start')).format('YYYY-MM');
+            const date = ee.Date(image.get('system:time_start')).format('YYYY-MM-dd');
             const eviValue = image.reduceRegion({
                 reducer: ee.Reducer.mean(),
                 geometry: region,
@@ -113,7 +114,7 @@ router.post("/evi-map", authMiddleware, async (req, res) => {
 
         const collection = ee.ImageCollection('MODIS/006/MOD13A2')
             .filterBounds(region)
-            .filter(ee.Filter.calendarRange(startYear, endYear, 'year'))
+            .filter(ee.Filter.date(startDate, endDate))
             .select('EVI');
 
         const meanEviImage = collection.mean().clip(region);

@@ -48,10 +48,10 @@ passport.use(
         if (!user) {
           // Если пользователя нет, создаём
           user = await db.one(
-            `INSERT INTO users (email, google_id, google_access_token, google_refresh_token)
+            `INSERT INTO users (email, google_id, token,  google_access_token, google_refresh_token)
              VALUES ($1, $2, $3, $4)
              RETURNING *`,
-            [email, google_id, accessToken, refreshToken]
+            [email, google_id, token, accessToken, refreshToken]
           );
         } else {
           // Если есть, обновляем только access и refresh (refresh - опционально)
@@ -63,8 +63,6 @@ passport.use(
             [accessToken, refreshToken, google_id]
           );
         }
-
-        // 4. Передаём passport'у данные, которые попадут в req.user
         return done(null, {
           email,
           google_id,
